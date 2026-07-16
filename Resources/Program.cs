@@ -413,9 +413,44 @@ namespace Quickgauge
         static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
     }
 
-    // Loads logo.png (next to the exe) for the splash screen, header bar, and
-    // settings page. The bitmap is decoded once and cached; every caller gets an
-    // Image sized by height with the source's aspect ratio preserved.
+    // Finds and starts LibreHardwareMonitor so the user doesn't have to launch it
+    // by hand every time. It requires admin rights (its own manifest demands
+    // elevation), so starting it always triggers a UAC prompt -- that click is an
+    // OS security boundary and can't be scripted around; the best we can do is get
+    // the prompt in front of the user automatically instead of leaving CPU temp on
+    // "N/A" until they remember to start it themselves.
+    public static class LhmLauncher
+    {
+        static readonly string[] CommonPaths =
+        {
+            System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Apps", "LibreHardwareMonitor", "LibreHardwareMonitor.exe"),
+            @"C:\Program Files\LibreHardwareMonitor\LibreHardwareMonitor.exe",
+            @"C:\Program Files (x86)\LibreHardwareMonitor\LibreHardwareMonitor.exe"
+        };
+
+        // Prefers a previously-remembered/browsed-to path, then falls back to the
+        // common install locations.
+        public static string FindInstall(string configuredPath)
+        {
+            if (!string.IsNullOrEmpty(configuredPath) && File.Exists(configuredPath)) return configuredPath;
+            foreach (var p in CommonPaths) if (File.Exists(p)) return p;
+            return null;
+        }
+
+        public static bool TryLaunch(string exePath)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
     // Loads PNG assets that live next to the exe (logo.png, icon.png, Settings.png,
     // slider.png, knob.png), caching each by filename so repeated Build()/Load()
     // calls (header, splash, settings page, every slider row...) only hit disk once.
@@ -581,12 +616,12 @@ namespace Quickgauge
         public double Scale = 1.0;
         public double FontSize = 14;
 
-        public bool ShowMobo = true;
+        public bool ShowMobo = false;
         public bool ShowCpuTemp = true;
-        public bool ShowCpuUsage = false;
+        public bool ShowCpuUsage = true;
         public bool ShowGpuTemp = true;
-        public bool ShowGpuUsage = false;
-        public bool ShowRam = false;
+        public bool ShowGpuUsage = true;
+        public bool ShowRam = true;
         public bool ShowDisk = false;
 
         // Display order of the built-in rows (top to bottom). Custom sensors always
@@ -602,10 +637,11 @@ namespace Quickgauge
         public string LabelDisk = "DISK";
 
         public int LhmPort = 8085;
+        public string LhmExePath = ""; // remembered install location, so it can be auto-started on launch
         public List<CustomSensor> CustomSensors = new List<CustomSensor>();
 
         public string ColorBackground = "#1E1E1E";
-        public string ColorBorder = "#2196F3";
+        public string ColorBorder = "#1E1E1E";
         public string ColorLabel = "#FFFFFF";
         public string ColorOk = "#66BB6A";
         public string ColorWarn = "#FB8C00";
@@ -613,9 +649,10 @@ namespace Quickgauge
 
         public string ColorHeaderBackground = "#141414";
         public double HeaderHeight = 30;
-        public double HeaderLogoSize = 70;
-        public double HeaderDotSize = 20; // now the settings (gear) icon's size, not a dot -- 2px was fine for a dot, not for an icon
+        public double HeaderLogoSize = 15;
+        public double HeaderDotSize = 18; // the settings (gear) icon's size, not a dot
         public bool HeaderAlwaysVisible = false;
+        public bool HeaderEnabled = true;
 
         public string HotkeyDisplay = "";
         public uint HotkeyModifiers = 0;
@@ -809,7 +846,9 @@ namespace Quickgauge
         Border _headerBar;
         StackPanel _rowsPanel;
         UIElement _dotsIcon;
+        SettingsWindow _settingsWindow;
         FrameworkElement _headerLogo;
+        bool _dragging;
 
         readonly Dictionary<string, TextBlock> _rows = new Dictionary<string, TextBlock>();
         readonly Dictionary<string, TextBlock> _customRows = new Dictionary<string, TextBlock>();
@@ -833,7 +872,35 @@ namespace Quickgauge
             MouseLeftButtonDown += (s, e) =>
             {
                 if (e.OriginalSource == _dotsIcon || IsDescendantOf(e.OriginalSource as DependencyObject, _dotsIcon)) return;
-                DragMove();
+
+                // Double-click anywhere on the overlay opens Settings too -- a second
+                // way in besides the header's gear icon, which matters once the header
+                // can be disabled entirely (otherwise there'd be no way back in).
+                if (e.ClickCount >= 2)
+                {
+                    OpenSettings();
+                    return;
+                }
+
+                // Guarded + swallowed: DragMove() can throw InvalidOperationException
+                // if it's re-entered (e.g. a very fast repeated click/hover-drag fires
+                // a second MouseLeftButtonDown while the previous DragMove hasn't
+                // unwound yet), and an unhandled exception here previously took down
+                // the whole app.
+                if (_dragging) return;
+                _dragging = true;
+                try
+                {
+                    DragMove();
+                }
+                catch (InvalidOperationException)
+                {
+                }
+                finally
+                {
+                    _dragging = false;
+                }
+
                 ClampToWorkArea();
                 _settings.Left = Left;
                 _settings.Top = Top;
@@ -846,8 +913,8 @@ namespace Quickgauge
                 _settings.Opacity = Opacity;
                 _settings.Save();
             };
-            MouseEnter += (s, e) => { if (!_settings.HeaderAlwaysVisible) _headerBar.Visibility = Visibility.Visible; };
-            MouseLeave += (s, e) => { if (!_settings.HeaderAlwaysVisible) _headerBar.Visibility = Visibility.Collapsed; };
+            MouseEnter += (s, e) => { if (_settings.HeaderEnabled && !_settings.HeaderAlwaysVisible) _headerBar.Visibility = Visibility.Visible; };
+            MouseLeave += (s, e) => { if (_settings.HeaderEnabled && !_settings.HeaderAlwaysVisible) _headerBar.Visibility = Visibility.Collapsed; };
 
             SourceInitialized += (s, e) =>
             {
@@ -907,7 +974,8 @@ namespace Quickgauge
                 Stretch = Stretch.Uniform,
                 Cursor = Cursors.Hand,
                 VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Right
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(8, 0, 0, 0) // gap between the logo and the icon
             };
             settingsIcon.MouseLeftButtonDown += (s, e) =>
             {
@@ -920,15 +988,22 @@ namespace Quickgauge
             _headerLogo.HorizontalAlignment = HorizontalAlignment.Left;
             _headerLogo.VerticalAlignment = VerticalAlignment.Center;
 
-            var headerGrid = new Grid();
-            headerGrid.Children.Add(_headerLogo);
-            headerGrid.Children.Add(settingsIcon);
+            // DockPanel, not Grid: a Grid with no column definitions gives both
+            // children the SAME cell, so a Left-aligned logo and a Right-aligned icon
+            // just get positioned at opposite edges of that one shared space -- if the
+            // logo is wide enough to reach the right edge, it renders straight under
+            // the icon. Docking the icon to the right reserves its own strip, and the
+            // logo (as the fill child) only ever gets what's left over.
+            var headerDock = new DockPanel { LastChildFill = true };
+            DockPanel.SetDock(settingsIcon, Dock.Right);
+            headerDock.Children.Add(settingsIcon);
+            headerDock.Children.Add(_headerLogo);
 
             _headerBar = new Border
             {
                 Padding = new Thickness(10, 4, 10, 4),
                 Visibility = Visibility.Collapsed,
-                Child = headerGrid
+                Child = headerDock
             };
 
             _rowsPanel = new StackPanel { Margin = new Thickness(0) };
@@ -958,10 +1033,21 @@ namespace Quickgauge
 
         public void OpenSettings()
         {
-            var win = new SettingsWindow(_settings, this);
-            win.Owner = this;
-            win.Show();
-            win.Activate();
+            if (_settingsWindow != null)
+            {
+                // Already open: bring it to the front instead of creating a second
+                // one (previously every click spawned a new dialog with no limit).
+                if (_settingsWindow.WindowState == WindowState.Minimized)
+                    _settingsWindow.WindowState = WindowState.Normal;
+                _settingsWindow.Activate();
+                return;
+            }
+
+            _settingsWindow = new SettingsWindow(_settings, this);
+            _settingsWindow.Owner = this;
+            _settingsWindow.Closed += (s, e) => _settingsWindow = null;
+            _settingsWindow.Show();
+            _settingsWindow.Activate();
         }
 
         public void ApplyRowVisibility()
@@ -1015,16 +1101,23 @@ namespace Quickgauge
 
         public void ApplyHeaderSettings()
         {
-            // MinHeight, not Height: a fixed Height would clip a logo taller than the
-            // bar (e.g. logo size 70 vs. header height 30) since WPF would constrain
-            // the child's arrange box to exactly Height regardless of its own size.
-            _headerBar.MinHeight = _settings.HeaderHeight;
-            _headerLogo.Width = _settings.HeaderLogoSize;
-            _headerLogo.Height = _settings.HeaderLogoSize;
+            _headerBar.Height = _settings.HeaderHeight;
+
+            // Logo height is capped at the header's own height so it can never grow
+            // past the bar. Width is deliberately left unset (not forced equal to
+            // Height): logo.png is a wide wordmark, and forcing a square box would
+            // fight Stretch=Uniform's own aspect-ratio scaling and squash it down to
+            // a sliver instead of showing it at a legible size.
+            _headerLogo.Height = Math.Min(_settings.HeaderLogoSize, _settings.HeaderHeight);
+            _headerLogo.Width = double.NaN;
+
             var settingsIcon = (Image)_dotsIcon;
             settingsIcon.Width = _settings.HeaderDotSize;
             settingsIcon.Height = _settings.HeaderDotSize;
-            _headerBar.Visibility = _settings.HeaderAlwaysVisible ? Visibility.Visible : Visibility.Collapsed;
+
+            _headerBar.Visibility = (_settings.HeaderEnabled && _settings.HeaderAlwaysVisible)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         public void ApplyScale()
@@ -1308,6 +1401,15 @@ namespace Quickgauge
             root.Children.Add(Divider());
             root.Children.Add(Header("Header bar"));
             Action onHeaderChange = () => { _owner.ApplyHeaderSettings(); _owner.ApplyColors(); _settings.Save(); };
+            root.Children.Add(Check("Enable header bar", () => _settings.HeaderEnabled, v => _settings.HeaderEnabled = v, onHeaderChange));
+            root.Children.Add(new TextBlock
+            {
+                Text = "Double-click the overlay to open Settings even with the header disabled.",
+                Foreground = Brushes.Gray,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 2, 0, 6)
+            });
             root.Children.Add(Check("Always show (skip hover)", () => _settings.HeaderAlwaysVisible, v => _settings.HeaderAlwaysVisible = v, onHeaderChange));
             root.Children.Add(ColorRow("Header background", () => _settings.ColorHeaderBackground, v => _settings.ColorHeaderBackground = v, onHeaderChange));
             root.Children.Add(SliderRow("Header height", 20, 50, () => _settings.HeaderHeight, v => { _settings.HeaderHeight = v; onHeaderChange(); }));
@@ -1326,9 +1428,11 @@ namespace Quickgauge
             });
 
             var lhmStatus = new TextBlock { Text = "Checking...", Foreground = Brushes.Gray, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            var lhmRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            var lhmRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
             var recheckBtn = MakeButton("Recheck");
-            var downloadBtn = MakeButton("Download LibreHardwareMonitor");
+            var startBtn = MakeButton("Start");
+            startBtn.Margin = new Thickness(8, 0, 0, 0);
+            var downloadBtn = MakeButton("Download");
             downloadBtn.Margin = new Thickness(8, 0, 0, 0);
             downloadBtn.Click += (s, e) =>
             {
@@ -1343,14 +1447,56 @@ namespace Quickgauge
                 bool ok = await Sensors.IsLhmAvailableAsync(_settings.LhmPort);
                 lhmStatus.Text = ok ? "Connected" : "Not detected";
                 lhmStatus.Foreground = ok ? new SolidColorBrush(Settings.SafeColor(_settings.ColorOk, Colors.LightGreen)) : new SolidColorBrush(Settings.SafeColor(_settings.ColorCrit, Colors.Red));
+                string knownExe = LhmLauncher.FindInstall(_settings.LhmExePath);
                 downloadBtn.Visibility = ok ? Visibility.Collapsed : Visibility.Visible;
+                startBtn.Visibility = (!ok && knownExe != null) ? Visibility.Visible : Visibility.Collapsed;
+            };
+            startBtn.Click += (s, e) =>
+            {
+                string exe = LhmLauncher.FindInstall(_settings.LhmExePath);
+                if (exe == null) return;
+                _settings.LhmExePath = exe;
+                _settings.Save();
+                LhmLauncher.TryLaunch(exe); // triggers a UAC prompt -- LHM's manifest requires admin
             };
             recheckBtn.Click += (s, e) => checkLhm();
             lhmRow.Children.Add(lhmStatus);
             lhmRow.Children.Add(recheckBtn);
+            lhmRow.Children.Add(startBtn);
             lhmRow.Children.Add(downloadBtn);
             root.Children.Add(lhmRow);
             Loaded += (s, e) => checkLhm();
+
+            var locateRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            var locatePathText = new TextBlock
+            {
+                Text = string.IsNullOrEmpty(_settings.LhmExePath) ? "(not located)" : _settings.LhmExePath,
+                Foreground = Brushes.Gray,
+                FontSize = 10,
+                Width = 220,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var locateBtn = MakeButton("Locate...");
+            locateBtn.Margin = new Thickness(8, 0, 0, 0);
+            locateBtn.Click += (s, e) =>
+            {
+                var dialog = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = "Locate LibreHardwareMonitor.exe",
+                    Filter = "LibreHardwareMonitor.exe|LibreHardwareMonitor.exe|Executable (*.exe)|*.exe"
+                };
+                if (dialog.ShowDialog() == true)
+                {
+                    _settings.LhmExePath = dialog.FileName;
+                    _settings.Save();
+                    locatePathText.Text = dialog.FileName;
+                    checkLhm();
+                }
+            };
+            locateRow.Children.Add(locatePathText);
+            locateRow.Children.Add(locateBtn);
+            root.Children.Add(locateRow);
 
             root.Children.Add(TextRow("Port", () => _settings.LhmPort.ToString(), v =>
             {
@@ -1861,8 +2007,33 @@ namespace Quickgauge
             var app = new App();
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+            // Safety net: this is a small always-running background utility, so a
+            // silently-swallowed rare glitch is a far better failure mode than the
+            // whole app (and its tray icon) disappearing on any single unexpected
+            // exception. DragMove() in particular is known to throw under odd
+            // event timing (guarded separately at the call site too).
+            app.DispatcherUnhandledException += (s, e) => { e.Handled = true; };
+
             Settings.CleanupLegacyStartupEntry();
             var settings = Settings.Load();
+
+            // Fire-and-forget: if LibreHardwareMonitor isn't already running, try to
+            // start it so CPU temp etc. work without the user launching it by hand.
+            // If it's genuinely not installed anywhere we know to look, this simply
+            // does nothing -- the Settings page's LibreHardwareMonitor section already
+            // shows "Not detected" with a Download button for that case.
+#pragma warning disable 4014
+            Task.Run(async () =>
+            {
+                bool alreadyRunning = await Sensors.IsLhmAvailableAsync(settings.LhmPort);
+                if (alreadyRunning) return;
+                string exe = LhmLauncher.FindInstall(settings.LhmExePath);
+                if (exe == null) return;
+                settings.LhmExePath = exe;
+                settings.Save();
+                LhmLauncher.TryLaunch(exe);
+            });
+#pragma warning restore 4014
 
             var splash = new SplashWindow(Settings.SafeColor(settings.ColorBorder, Colors.DodgerBlue));
             splash.Show();
