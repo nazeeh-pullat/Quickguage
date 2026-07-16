@@ -1280,19 +1280,19 @@ namespace Quickgauge
             _owner = owner;
 
             Title = "Quickgauge - Settings";
-            Width = 360;
-            MaxHeight = SystemParameters.PrimaryScreenHeight * 0.85;
+            Width = 1180;
+            MaxHeight = SystemParameters.PrimaryScreenHeight * 0.9;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Topmost = true;
-            Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));
+            Background = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));
 
-            var root = new StackPanel { Margin = new Thickness(16) };
+            var page = new StackPanel { Margin = new Thickness(20) };
 
-            var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
-            titleRow.Children.Add(Logo.Build(32));
-            root.Children.Add(titleRow);
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0, 0, 16) };
+            titleRow.Children.Add(Logo.Build(48));
+            page.Children.Add(titleRow);
 
             Action onDisplayChange = () =>
             {
@@ -1301,18 +1301,35 @@ namespace Quickgauge
                 _settings.Save();
             };
 
-            root.Children.Add(Header("Startup"));
-            root.Children.Add(Check("Start with Windows", Settings.IsStartupEnabled, v => Settings.SetStartupEnabled(v)));
+            // --- Startup -----------------------------------------------------
+            var startupContent = new StackPanel();
+            startupContent.Children.Add(Check("Start with Windows", Settings.IsStartupEnabled, v => Settings.SetStartupEnabled(v)));
+            var startupCard = Card("Startup", startupContent);
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("Display & order"));
-            root.Children.Add(new TextBlock
+            // --- Display & order (table: Show / Sensor / Up / Dn) -------------
+            var displayContent = new StackPanel();
+            displayContent.Children.Add(new TextBlock
             {
                 Text = "Use Up/Dn to change the order rows appear in.",
                 Foreground = Brushes.Gray,
                 FontSize = 11,
-                Margin = new Thickness(0, 0, 0, 6)
+                Margin = new Thickness(0, 0, 0, 8)
             });
+
+            var tableHeaderRow = new Grid();
+            tableHeaderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+            tableHeaderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            tableHeaderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            tableHeaderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            string[] headerLabels = { "Show", "Sensor", "Up", "Dn" };
+            for (int i = 0; i < headerLabels.Length; i++)
+            {
+                var headCell = new TextBlock { Text = headerLabels[i], Foreground = Brushes.Gray, FontSize = 11, FontWeight = FontWeights.Bold };
+                Grid.SetColumn(headCell, i);
+                tableHeaderRow.Children.Add(headCell);
+            }
+            displayContent.Children.Add(tableHeaderRow);
+            displayContent.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)), Margin = new Thickness(0, 4, 0, 6) });
 
             var displayListPanel = new StackPanel();
             Action refreshDisplayList = null;
@@ -1324,85 +1341,93 @@ namespace Quickgauge
                     string key = _settings.RowOrder[i];
                     int index = i;
 
-                    var rowPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+                    var rowGrid = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+                    rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+                    rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+                    rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
 
-                    var cb = new CheckBox
-                    {
-                        Content = RowDisplayName(key),
-                        Foreground = Brushes.White,
-                        IsChecked = GetShow(key),
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Width = 210
-                    };
+                    var cb = new CheckBox { IsChecked = GetShow(key), VerticalAlignment = VerticalAlignment.Center };
                     cb.Checked += (s, e) => { SetShow(key, true); onDisplayChange(); };
                     cb.Unchecked += (s, e) => { SetShow(key, false); onDisplayChange(); };
+                    Grid.SetColumn(cb, 0);
+
+                    var nameText = new TextBlock { Text = RowDisplayName(key), Foreground = Brushes.White, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+                    Grid.SetColumn(nameText, 1);
 
                     var upBtn = MakeButton("Up");
-                    upBtn.Padding = new Thickness(6, 2, 6, 2);
+                    upBtn.Padding = new Thickness(4, 2, 4, 2);
                     upBtn.IsEnabled = index > 0;
                     upBtn.Click += (s, e) => MoveRow(key, -1, refreshDisplayList);
+                    Grid.SetColumn(upBtn, 2);
 
                     var downBtn = MakeButton("Dn");
-                    downBtn.Padding = new Thickness(6, 2, 6, 2);
+                    downBtn.Padding = new Thickness(4, 2, 4, 2);
                     downBtn.Margin = new Thickness(4, 0, 0, 0);
                     downBtn.IsEnabled = index < _settings.RowOrder.Count - 1;
                     downBtn.Click += (s, e) => MoveRow(key, 1, refreshDisplayList);
+                    Grid.SetColumn(downBtn, 3);
 
-                    rowPanel.Children.Add(cb);
-                    rowPanel.Children.Add(upBtn);
-                    rowPanel.Children.Add(downBtn);
-                    displayListPanel.Children.Add(rowPanel);
+                    rowGrid.Children.Add(cb);
+                    rowGrid.Children.Add(nameText);
+                    rowGrid.Children.Add(upBtn);
+                    rowGrid.Children.Add(downBtn);
+                    displayListPanel.Children.Add(rowGrid);
                 }
             };
             refreshDisplayList();
-            root.Children.Add(displayListPanel);
+            displayContent.Children.Add(displayListPanel);
+            var displayCard = Card("Display & order", displayContent);
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("Rename headings"));
-            root.Children.Add(TextRow("Motherboard", () => _settings.LabelMobo, v => _settings.LabelMobo = v, onDisplayChange));
-            root.Children.Add(TextRow("CPU temp", () => _settings.LabelCpuTemp, v => _settings.LabelCpuTemp = v, onDisplayChange));
-            root.Children.Add(TextRow("CPU usage", () => _settings.LabelCpuUsage, v => _settings.LabelCpuUsage = v, onDisplayChange));
-            root.Children.Add(TextRow("GPU temp", () => _settings.LabelGpuTemp, v => _settings.LabelGpuTemp = v, onDisplayChange));
-            root.Children.Add(TextRow("GPU usage", () => _settings.LabelGpuUsage, v => _settings.LabelGpuUsage = v, onDisplayChange));
-            root.Children.Add(TextRow("RAM", () => _settings.LabelRam, v => _settings.LabelRam = v, onDisplayChange));
-            root.Children.Add(TextRow("Disk", () => _settings.LabelDisk, v => _settings.LabelDisk = v, onDisplayChange));
+            // --- Rename headings ----------------------------------------------
+            var renameContent = new StackPanel();
+            renameContent.Children.Add(TextRow("Motherboard", () => _settings.LabelMobo, v => _settings.LabelMobo = v, onDisplayChange));
+            renameContent.Children.Add(TextRow("CPU temp", () => _settings.LabelCpuTemp, v => _settings.LabelCpuTemp = v, onDisplayChange));
+            renameContent.Children.Add(TextRow("CPU usage", () => _settings.LabelCpuUsage, v => _settings.LabelCpuUsage = v, onDisplayChange));
+            renameContent.Children.Add(TextRow("GPU temp", () => _settings.LabelGpuTemp, v => _settings.LabelGpuTemp = v, onDisplayChange));
+            renameContent.Children.Add(TextRow("GPU usage", () => _settings.LabelGpuUsage, v => _settings.LabelGpuUsage = v, onDisplayChange));
+            renameContent.Children.Add(TextRow("RAM", () => _settings.LabelRam, v => _settings.LabelRam = v, onDisplayChange));
+            renameContent.Children.Add(TextRow("Disk", () => _settings.LabelDisk, v => _settings.LabelDisk = v, onDisplayChange));
+            var renameCard = Card("Rename headings", renameContent);
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("Text & size"));
-            root.Children.Add(SliderRow("Text size", 10, 24, () => _settings.FontSize, v =>
+            // --- Text & size ---------------------------------------------------
+            var textSizeContent = new StackPanel();
+            textSizeContent.Children.Add(SliderRow("Text size", 10, 24, () => _settings.FontSize, v =>
             {
                 _settings.FontSize = v;
                 _owner.RequestImmediateRefresh();
                 _settings.Save();
             }));
-            root.Children.Add(SliderRow("Overlay size", 0.6, 2.0, () => _settings.Scale, v =>
+            textSizeContent.Children.Add(SliderRow("Overlay size", 0.6, 2.0, () => _settings.Scale, v =>
             {
                 _settings.Scale = v;
                 _owner.ApplyScale();
                 _settings.Save();
             }));
-            root.Children.Add(SliderRow("Opacity", 0.15, 1.0, () => _settings.Opacity, v =>
+            textSizeContent.Children.Add(SliderRow("Opacity", 0.15, 1.0, () => _settings.Opacity, v =>
             {
                 _settings.Opacity = v;
                 _owner.ApplyOpacity();
                 _settings.Save();
             }));
+            var textSizeCard = Card("Text & size", textSizeContent);
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("Colors"));
+            // --- Colors ----------------------------------------------------------
+            var colorsContent = new StackPanel();
             Action onColorChange = () => { _owner.ApplyColors(); _settings.Save(); };
-            root.Children.Add(ColorRow("Background", () => _settings.ColorBackground, v => _settings.ColorBackground = v, onColorChange));
-            root.Children.Add(ColorRow("Border / accent", () => _settings.ColorBorder, v => _settings.ColorBorder = v, onColorChange));
-            root.Children.Add(ColorRow("Label text", () => _settings.ColorLabel, v => _settings.ColorLabel = v, onColorChange));
-            root.Children.Add(ColorRow("Value: OK", () => _settings.ColorOk, v => _settings.ColorOk = v, onColorChange));
-            root.Children.Add(ColorRow("Value: Warning", () => _settings.ColorWarn, v => _settings.ColorWarn = v, onColorChange));
-            root.Children.Add(ColorRow("Value: Critical", () => _settings.ColorCrit, v => _settings.ColorCrit = v, onColorChange));
+            colorsContent.Children.Add(ColorRow("Background", () => _settings.ColorBackground, v => _settings.ColorBackground = v, onColorChange));
+            colorsContent.Children.Add(ColorRow("Border / accent", () => _settings.ColorBorder, v => _settings.ColorBorder = v, onColorChange));
+            colorsContent.Children.Add(ColorRow("Label text", () => _settings.ColorLabel, v => _settings.ColorLabel = v, onColorChange));
+            colorsContent.Children.Add(ColorRow("Value: OK", () => _settings.ColorOk, v => _settings.ColorOk = v, onColorChange));
+            colorsContent.Children.Add(ColorRow("Value: Warning", () => _settings.ColorWarn, v => _settings.ColorWarn = v, onColorChange));
+            colorsContent.Children.Add(ColorRow("Value: Critical", () => _settings.ColorCrit, v => _settings.ColorCrit = v, onColorChange));
+            var colorsCard = Card("Colors", colorsContent);
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("Header bar"));
+            // --- Header bar (two internal sub-columns) --------------------------
             Action onHeaderChange = () => { _owner.ApplyHeaderSettings(); _owner.ApplyColors(); _settings.Save(); };
-            root.Children.Add(Check("Enable header bar", () => _settings.HeaderEnabled, v => _settings.HeaderEnabled = v, onHeaderChange));
-            root.Children.Add(new TextBlock
+            var headerLeft = new StackPanel();
+            headerLeft.Children.Add(Check("Enable header bar", () => _settings.HeaderEnabled, v => _settings.HeaderEnabled = v, onHeaderChange));
+            headerLeft.Children.Add(new TextBlock
             {
                 Text = "Double-click the overlay to open Settings even with the header disabled.",
                 Foreground = Brushes.Gray,
@@ -1410,25 +1435,42 @@ namespace Quickgauge
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 2, 0, 6)
             });
-            root.Children.Add(Check("Always show (skip hover)", () => _settings.HeaderAlwaysVisible, v => _settings.HeaderAlwaysVisible = v, onHeaderChange));
-            root.Children.Add(ColorRow("Header background", () => _settings.ColorHeaderBackground, v => _settings.ColorHeaderBackground = v, onHeaderChange));
-            root.Children.Add(SliderRow("Header height", 20, 50, () => _settings.HeaderHeight, v => { _settings.HeaderHeight = v; onHeaderChange(); }));
-            root.Children.Add(SliderRow("Header logo size", 10, 100, () => _settings.HeaderLogoSize, v => { _settings.HeaderLogoSize = v; onHeaderChange(); }));
-            root.Children.Add(SliderRow("Header settings icon size", 10, 40, () => _settings.HeaderDotSize, v => { _settings.HeaderDotSize = v; onHeaderChange(); }));
+            headerLeft.Children.Add(Check("Always show (skip hover)", () => _settings.HeaderAlwaysVisible, v => _settings.HeaderAlwaysVisible = v, onHeaderChange));
+            headerLeft.Children.Add(ColorRow("Header background", () => _settings.ColorHeaderBackground, v => _settings.ColorHeaderBackground = v, onHeaderChange));
+            headerLeft.Children.Add(SliderRow("Header height", 20, 50, () => _settings.HeaderHeight, v => { _settings.HeaderHeight = v; onHeaderChange(); }, 170, "px"));
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("LibreHardwareMonitor"));
-            root.Children.Add(new TextBlock
+            var headerRight = new StackPanel { Margin = new Thickness(16, 0, 0, 0) };
+            headerRight.Children.Add(SliderRow("Header logo size", 10, 100, () => _settings.HeaderLogoSize, v => { _settings.HeaderLogoSize = v; onHeaderChange(); }, 170, "px"));
+            headerRight.Children.Add(SliderRow("Header settings icon size", 10, 40, () => _settings.HeaderDotSize, v => { _settings.HeaderDotSize = v; onHeaderChange(); }, 170, "px"));
+
+            var headerColumns = new Grid();
+            headerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Grid.SetColumn(headerLeft, 0);
+            Grid.SetColumn(headerRight, 1);
+            headerColumns.Children.Add(headerLeft);
+            headerColumns.Children.Add(headerRight);
+            var headerCard = Card("Header bar", headerColumns);
+
+            // --- LibreHardwareMonitor --------------------------------------------
+            var lhmContent = new StackPanel();
+            lhmContent.Children.Add(new TextBlock
             {
                 Text = "Real CPU temperature and non-NVIDIA GPU temp/usage require LibreHardwareMonitor running with its Remote Web Server enabled. Everything else (RAM/Disk/CPU usage, NVIDIA GPU) works without it.",
                 Foreground = Brushes.Gray,
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 2, 0, 8)
+                Margin = new Thickness(0, 0, 0, 10)
             });
 
+            var lhmStatusRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+            var lhmStatusLabel = new TextBlock { Text = "Status:", Foreground = Brushes.Gray, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
             var lhmStatus = new TextBlock { Text = "Checking...", Foreground = Brushes.Gray, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-            var lhmRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+            lhmStatusRow.Children.Add(lhmStatusLabel);
+            lhmStatusRow.Children.Add(lhmStatus);
+            lhmContent.Children.Add(lhmStatusRow);
+
+            var lhmButtonRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
             var recheckBtn = MakeButton("Recheck");
             var startBtn = MakeButton("Start");
             startBtn.Margin = new Thickness(8, 0, 0, 0);
@@ -1460,23 +1502,24 @@ namespace Quickgauge
                 LhmLauncher.TryLaunch(exe); // triggers a UAC prompt -- LHM's manifest requires admin
             };
             recheckBtn.Click += (s, e) => checkLhm();
-            lhmRow.Children.Add(lhmStatus);
-            lhmRow.Children.Add(recheckBtn);
-            lhmRow.Children.Add(startBtn);
-            lhmRow.Children.Add(downloadBtn);
-            root.Children.Add(lhmRow);
+            lhmButtonRow.Children.Add(recheckBtn);
+            lhmButtonRow.Children.Add(startBtn);
+            lhmButtonRow.Children.Add(downloadBtn);
+            lhmContent.Children.Add(lhmButtonRow);
             Loaded += (s, e) => checkLhm();
 
-            var locateRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            var pathLabel = new TextBlock { Text = "Path:", Foreground = Brushes.Gray, FontSize = 11, Margin = new Thickness(0, 0, 0, 2) };
+            lhmContent.Children.Add(pathLabel);
+            var locateRow = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
             var locatePathText = new TextBlock
             {
                 Text = string.IsNullOrEmpty(_settings.LhmExePath) ? "(not located)" : _settings.LhmExePath,
                 Foreground = Brushes.Gray,
                 FontSize = 10,
-                Width = 220,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 VerticalAlignment = VerticalAlignment.Center
             };
+            DockPanel.SetDock(locatePathText, Dock.Left);
             var locateBtn = MakeButton("Locate...");
             locateBtn.Margin = new Thickness(8, 0, 0, 0);
             locateBtn.Click += (s, e) =>
@@ -1494,18 +1537,20 @@ namespace Quickgauge
                     checkLhm();
                 }
             };
-            locateRow.Children.Add(locatePathText);
+            DockPanel.SetDock(locateBtn, Dock.Right);
             locateRow.Children.Add(locateBtn);
-            root.Children.Add(locateRow);
+            locateRow.Children.Add(locatePathText);
+            lhmContent.Children.Add(locateRow);
 
-            root.Children.Add(TextRow("Port", () => _settings.LhmPort.ToString(), v =>
+            lhmContent.Children.Add(TextRow("Port", () => _settings.LhmPort.ToString(), v =>
             {
                 int parsed;
                 if (int.TryParse(v, out parsed) && parsed > 0 && parsed < 65536) _settings.LhmPort = parsed;
             }, () => { _settings.Save(); checkLhm(); }));
+            var lhmCard = Card("LibreHardwareMonitor", lhmContent);
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("Custom sensors"));
+            // --- Custom sensors ----------------------------------------------------
+            var customContent = new StackPanel();
             var customListPanel = new StackPanel();
             Action refreshCustomList = null;
             refreshCustomList = () =>
@@ -1537,9 +1582,10 @@ namespace Quickgauge
                 }
             };
             refreshCustomList();
-            root.Children.Add(customListPanel);
+            customContent.Children.Add(customListPanel);
 
             var addSensorBtn = MakeButton("Add sensor...");
+            addSensorBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
             addSensorBtn.Margin = new Thickness(0, 6, 0, 0);
             addSensorBtn.Click += (s, e) =>
             {
@@ -1553,11 +1599,12 @@ namespace Quickgauge
                 picker.Owner = this;
                 picker.ShowDialog();
             };
-            root.Children.Add(addSensorBtn);
+            customContent.Children.Add(addSensorBtn);
+            var customCard = Card("Custom sensors", customContent);
 
-            root.Children.Add(Divider());
-            root.Children.Add(Header("Hotkey (toggle overlay)"));
-            var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 12) };
+            // --- Hotkey ---------------------------------------------------------
+            var hotkeyContent = new StackPanel();
+            var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal };
             _hotkeyBox = new TextBox
             {
                 Width = 150,
@@ -1583,18 +1630,52 @@ namespace Quickgauge
             hotkeyRow.Children.Add(_hotkeyBox);
             hotkeyRow.Children.Add(setBtn);
             hotkeyRow.Children.Add(clearBtn);
-            root.Children.Add(hotkeyRow);
+            hotkeyContent.Children.Add(hotkeyRow);
+            var hotkeyCard = Card("Hotkey (toggle overlay)", hotkeyContent);
+
+            // --- Assemble the grid ------------------------------------------------
+            var mainGrid = new Grid();
+            for (int i = 0; i < 4; i++) mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            Grid.SetRow(startupCard, 0); Grid.SetColumn(startupCard, 0); Grid.SetColumnSpan(startupCard, 4);
+
+            Grid.SetRow(displayCard, 1); Grid.SetColumn(displayCard, 0);
+            Grid.SetRow(renameCard, 1); Grid.SetColumn(renameCard, 1);
+            Grid.SetRow(textSizeCard, 1); Grid.SetColumn(textSizeCard, 2);
+            Grid.SetRow(colorsCard, 1); Grid.SetColumn(colorsCard, 3);
+
+            Grid.SetRow(headerCard, 2); Grid.SetColumn(headerCard, 0); Grid.SetColumnSpan(headerCard, 2);
+            Grid.SetRow(lhmCard, 2); Grid.SetColumn(lhmCard, 2);
+            Grid.SetRow(customCard, 2); Grid.SetColumn(customCard, 3);
+
+            Grid.SetRow(hotkeyCard, 3); Grid.SetColumn(hotkeyCard, 0); Grid.SetColumnSpan(hotkeyCard, 4);
+
+            mainGrid.Children.Add(startupCard);
+            mainGrid.Children.Add(displayCard);
+            mainGrid.Children.Add(renameCard);
+            mainGrid.Children.Add(textSizeCard);
+            mainGrid.Children.Add(colorsCard);
+            mainGrid.Children.Add(headerCard);
+            mainGrid.Children.Add(lhmCard);
+            mainGrid.Children.Add(customCard);
+            mainGrid.Children.Add(hotkeyCard);
+
+            page.Children.Add(mainGrid);
 
             var closeBtn = MakeButton("Close");
             closeBtn.HorizontalAlignment = HorizontalAlignment.Right;
-            closeBtn.Margin = new Thickness(0, 12, 0, 0);
+            closeBtn.Margin = new Thickness(0, 14, 6, 0);
             closeBtn.Click += (s, e) => Close();
-            root.Children.Add(closeBtn);
+            page.Children.Add(closeBtn);
 
             // Fixed footer (outside the scroll area): app version centered, developer
             // credit on the left. Plain, non-interactive TextBlocks -- not settings
             // fields, so there is no way for the user to edit either value.
-            var footer = new Grid { Margin = new Thickness(16, 6, 16, 10) };
+            var footer = new Grid { Margin = new Thickness(20, 6, 20, 10) };
             var devLink = new TextBlock
             {
                 Text = "Created by " + AppInfo.Developer,
@@ -1621,11 +1702,38 @@ namespace Quickgauge
             var outerDock = new DockPanel();
             DockPanel.SetDock(footer, Dock.Bottom);
             outerDock.Children.Add(footer);
-            outerDock.Children.Add(new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+            outerDock.Children.Add(new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
 
             Content = outerDock;
 
             PreviewKeyDown += SettingsWindow_PreviewKeyDown;
+        }
+
+        // A titled card: bordered, rounded panel used to group one section of
+        // settings in the landscape grid layout. Title has no leading number --
+        // just the section name.
+        static Border Card(string title, UIElement content)
+        {
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = title,
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.Bold,
+                FontSize = 14,
+                Margin = new Thickness(0, 0, 0, 10)
+            });
+            stack.Children.Add(content);
+            return new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0x1C, 0x1C, 0x1C)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x30, 0x30, 0x30)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(16),
+                Margin = new Thickness(6),
+                Child = stack
+            };
         }
 
         void StartHotkeyCapture()
@@ -1723,27 +1831,6 @@ namespace Quickgauge
             return key;
         }
 
-        static TextBlock Header(string text)
-        {
-            return new TextBlock
-            {
-                Text = text,
-                Foreground = Brushes.White,
-                FontWeight = FontWeights.Bold,
-                FontSize = 13,
-                Margin = new Thickness(0, 12, 0, 4)
-            };
-        }
-
-        static Border Divider()
-        {
-            return new Border
-            {
-                Height = 1,
-                Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3A)),
-                Margin = new Thickness(0, 10, 0, 0)
-            };
-        }
 
         static CheckBox Check(string text, Func<bool> get, Action<bool> set, Action onChange = null)
         {
@@ -1763,17 +1850,34 @@ namespace Quickgauge
         // exact values -- typing a number outside the slider's own range still applies
         // (the slider just won't visually track it), so the slider's range is a
         // suggestion, not a hard limit.
-        static StackPanel SliderRow(string label, double min, double max, Func<double> get, Action<double> onChange)
+        static StackPanel SliderRow(string label, double min, double max, Func<double> get, Action<double> onChange, double sliderWidth = 220, string unit = null)
         {
             var row = new StackPanel { Margin = new Thickness(0, 2, 0, 10) };
 
-            var headRow = new StackPanel { Orientation = Orientation.Horizontal };
-            var lbl = new TextBlock { Text = label, Foreground = Brushes.LightGray, FontSize = 12, Width = 150, VerticalAlignment = VerticalAlignment.Center };
-            var numberBox = new TextBox { Width = 60, Text = FormatNumber(get()), VerticalContentAlignment = VerticalAlignment.Center };
-            headRow.Children.Add(lbl);
-            headRow.Children.Add(numberBox);
+            var headRow = new DockPanel();
+            var lbl = new TextBlock { Text = label, Foreground = Brushes.LightGray, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            DockPanel.SetDock(lbl, Dock.Left);
 
-            var slider = new ImageSlider(min, max, get(), 280) { Margin = new Thickness(0, 4, 0, 0) };
+            var valuePanel = new StackPanel { Orientation = Orientation.Horizontal };
+            var numberBox = new TextBox { Width = 55, Text = FormatNumber(get()), VerticalContentAlignment = VerticalAlignment.Center };
+            valuePanel.Children.Add(numberBox);
+            if (!string.IsNullOrEmpty(unit))
+            {
+                valuePanel.Children.Add(new TextBlock
+                {
+                    Text = unit,
+                    Foreground = Brushes.Gray,
+                    FontSize = 11,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0, 0, 0)
+                });
+            }
+            DockPanel.SetDock(valuePanel, Dock.Right);
+
+            headRow.Children.Add(lbl);
+            headRow.Children.Add(valuePanel);
+
+            var slider = new ImageSlider(min, max, get(), sliderWidth) { Margin = new Thickness(0, 4, 0, 0) };
 
             bool syncing = false;
             slider.ValueChanged += v =>
