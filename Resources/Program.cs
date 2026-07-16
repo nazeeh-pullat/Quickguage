@@ -423,6 +423,19 @@ namespace Quickgauge
     {
         static readonly Dictionary<string, BitmapImage> _cache = new Dictionary<string, BitmapImage>();
 
+        // Checks next to the exe first, then a "Resources" subfolder -- the project's
+        // source/design files live in Resources/ while the exe itself sits at the
+        // project root, so a shipped asset could reasonably end up in either spot.
+        public static string ResolvePath(string filename)
+        {
+            string dir = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string direct = System.IO.Path.Combine(dir, filename);
+            if (File.Exists(direct)) return direct;
+            string inResources = System.IO.Path.Combine(dir, "Resources", filename);
+            if (File.Exists(inResources)) return inResources;
+            return null;
+        }
+
         public static BitmapImage Load(string filename)
         {
             BitmapImage cached;
@@ -431,9 +444,8 @@ namespace Quickgauge
             BitmapImage bmp = null;
             try
             {
-                string dir = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string path = System.IO.Path.Combine(dir, filename);
-                if (File.Exists(path))
+                string path = ResolvePath(filename);
+                if (path != null)
                 {
                     bmp = new BitmapImage();
                     bmp.BeginInit();
@@ -479,9 +491,6 @@ namespace Quickgauge
         }
     }
 
-    // A user-picked LibreHardwareMonitor sensor shown as an extra overlay row.
-    // Warn/Crit are NaN when the user hasn't set a threshold, in which case the
-    // row is always shown in the label color rather than status-colored.
     // A slider skinned with slider.png (track) and knob.png (thumb) instead of
     // WPF's default Slider chrome. Built on Canvas for simple absolute positioning
     // of the knob; drag it or click anywhere on the track to set a value.
@@ -552,6 +561,9 @@ namespace Quickgauge
         }
     }
 
+    // A user-picked LibreHardwareMonitor sensor shown as an extra overlay row.
+    // Warn/Crit are NaN when the user hasn't set a threshold, in which case the
+    // row is always shown in the label color rather than status-colored.
     public class CustomSensor
     {
         public string SensorId = "";
@@ -600,10 +612,9 @@ namespace Quickgauge
         public string ColorCrit = "#E53935";
 
         public string ColorHeaderBackground = "#141414";
-        public string ColorDots = "#B0B0B0";
         public double HeaderHeight = 30;
         public double HeaderLogoSize = 70;
-        public double HeaderDotSize = 2;
+        public double HeaderDotSize = 20; // now the settings (gear) icon's size, not a dot -- 2px was fine for a dot, not for an icon
         public bool HeaderAlwaysVisible = false;
 
         public string HotkeyDisplay = "";
@@ -989,7 +1000,6 @@ namespace Quickgauge
             var bg = Settings.SafeColor(_settings.ColorBackground, Color.FromRgb(0x1E, 0x1E, 0x1E));
             var border = Settings.SafeColor(_settings.ColorBorder, Colors.DodgerBlue);
             var headerBg = Settings.SafeColor(_settings.ColorHeaderBackground, Color.FromRgb(0x14, 0x14, 0x14));
-            var dots = Settings.SafeColor(_settings.ColorDots, Colors.Gray);
 
             _rootBorder.Background = new SolidColorBrush(Color.FromArgb(0xD0, bg.R, bg.G, bg.B));
             _rootBorder.BorderBrush = new SolidColorBrush(border);
@@ -997,11 +1007,8 @@ namespace Quickgauge
 
             _headerBar.Background = new SolidColorBrush(Color.FromArgb(0xE0, headerBg.R, headerBg.G, headerBg.B));
 
-            foreach (var child in ((StackPanel)_dotsIcon).Children)
-            {
-                var ellipse = child as Ellipse;
-                if (ellipse != null) ellipse.Fill = new SolidColorBrush(dots);
-            }
+            // The settings icon is a fixed-color raster image (Settings.png), not a
+            // vector shape, so unlike the old dots there is no tint to apply here.
 
             RequestImmediateRefresh(); // re-colors row values against the (possibly changed) status colors
         }
@@ -1014,11 +1021,9 @@ namespace Quickgauge
             _headerBar.MinHeight = _settings.HeaderHeight;
             _headerLogo.Width = _settings.HeaderLogoSize;
             _headerLogo.Height = _settings.HeaderLogoSize;
-            foreach (var child in ((StackPanel)_dotsIcon).Children)
-            {
-                var ellipse = child as Ellipse;
-                if (ellipse != null) { ellipse.Width = _settings.HeaderDotSize; ellipse.Height = _settings.HeaderDotSize; }
-            }
+            var settingsIcon = (Image)_dotsIcon;
+            settingsIcon.Width = _settings.HeaderDotSize;
+            settingsIcon.Height = _settings.HeaderDotSize;
             _headerBar.Visibility = _settings.HeaderAlwaysVisible ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -1305,10 +1310,9 @@ namespace Quickgauge
             Action onHeaderChange = () => { _owner.ApplyHeaderSettings(); _owner.ApplyColors(); _settings.Save(); };
             root.Children.Add(Check("Always show (skip hover)", () => _settings.HeaderAlwaysVisible, v => _settings.HeaderAlwaysVisible = v, onHeaderChange));
             root.Children.Add(ColorRow("Header background", () => _settings.ColorHeaderBackground, v => _settings.ColorHeaderBackground = v, onHeaderChange));
-            root.Children.Add(ColorRow("Dots color", () => _settings.ColorDots, v => _settings.ColorDots = v, onHeaderChange));
             root.Children.Add(SliderRow("Header height", 20, 50, () => _settings.HeaderHeight, v => { _settings.HeaderHeight = v; onHeaderChange(); }));
-            root.Children.Add(SliderRow("Header logo size", 10, 34, () => _settings.HeaderLogoSize, v => { _settings.HeaderLogoSize = v; onHeaderChange(); }));
-            root.Children.Add(SliderRow("Header dot size", 2, 8, () => _settings.HeaderDotSize, v => { _settings.HeaderDotSize = v; onHeaderChange(); }));
+            root.Children.Add(SliderRow("Header logo size", 10, 100, () => _settings.HeaderLogoSize, v => { _settings.HeaderLogoSize = v; onHeaderChange(); }));
+            root.Children.Add(SliderRow("Header settings icon size", 10, 40, () => _settings.HeaderDotSize, v => { _settings.HeaderDotSize = v; onHeaderChange(); }));
 
             root.Children.Add(Divider());
             root.Children.Add(Header("LibreHardwareMonitor"));
@@ -1818,9 +1822,8 @@ namespace Quickgauge
             _icon = new System.Windows.Forms.NotifyIcon();
             try
             {
-                string dir = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string iconPath = System.IO.Path.Combine(dir, "icon.ico");
-                _icon.Icon = File.Exists(iconPath)
+                string iconPath = Assets.ResolvePath("icon.ico");
+                _icon.Icon = iconPath != null
                     ? new System.Drawing.Icon(iconPath)
                     : System.Drawing.SystemIcons.Application;
             }
