@@ -884,33 +884,26 @@ namespace Quickgauge
 
         void BuildUi()
         {
-            // Header bar: logo on the left, vertically stacked dots on the right
+            // Header bar: logo on the left, a settings (gear) icon on the right
             // (click to open Settings). Lives in its own Grid row so showing/hiding
             // it pushes the metric rows below via normal layout flow, rather than
             // overlapping them.
-            var dotsStack = new StackPanel
+            var settingsIcon = new Image
             {
-                Orientation = Orientation.Vertical,
+                Source = Assets.Load("Settings.png"),
+                Width = _settings.HeaderDotSize,
+                Height = _settings.HeaderDotSize,
+                Stretch = Stretch.Uniform,
+                Cursor = Cursors.Hand,
                 VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Cursor = Cursors.Hand
+                HorizontalAlignment = HorizontalAlignment.Right
             };
-            for (int i = 0; i < 3; i++)
-            {
-                dotsStack.Children.Add(new Ellipse
-                {
-                    Width = _settings.HeaderDotSize,
-                    Height = _settings.HeaderDotSize,
-                    Fill = new SolidColorBrush(Settings.SafeColor(_settings.ColorDots, Colors.Gray)),
-                    Margin = new Thickness(0, 1.5, 0, 1.5)
-                });
-            }
-            dotsStack.MouseLeftButtonDown += (s, e) =>
+            settingsIcon.MouseLeftButtonDown += (s, e) =>
             {
                 e.Handled = true;
                 OpenSettings();
             };
-            _dotsIcon = dotsStack;
+            _dotsIcon = settingsIcon;
 
             _headerLogo = Logo.Build(_settings.HeaderLogoSize);
             _headerLogo.HorizontalAlignment = HorizontalAlignment.Left;
@@ -918,7 +911,7 @@ namespace Quickgauge
 
             var headerGrid = new Grid();
             headerGrid.Children.Add(_headerLogo);
-            headerGrid.Children.Add(dotsStack);
+            headerGrid.Children.Add(settingsIcon);
 
             _headerBar = new Border
             {
@@ -1630,15 +1623,15 @@ namespace Quickgauge
             headRow.Children.Add(lbl);
             headRow.Children.Add(numberBox);
 
-            var slider = new Slider { Minimum = min, Maximum = max, Value = get(), Margin = new Thickness(0, 4, 0, 0) };
+            var slider = new ImageSlider(min, max, get(), 280) { Margin = new Thickness(0, 4, 0, 0) };
 
             bool syncing = false;
-            slider.ValueChanged += (s, e) =>
+            slider.ValueChanged += v =>
             {
                 if (syncing) return;
                 syncing = true;
-                numberBox.Text = FormatNumber(slider.Value);
-                onChange(slider.Value);
+                numberBox.Text = FormatNumber(v);
+                onChange(v);
                 syncing = false;
             };
             numberBox.LostFocus += (s, e) =>
@@ -1647,7 +1640,7 @@ namespace Quickgauge
                 if (double.TryParse(numberBox.Text, out v))
                 {
                     syncing = true;
-                    if (v >= slider.Minimum && v <= slider.Maximum) slider.Value = v;
+                    if (v >= min && v <= max) slider.Value = v;
                     onChange(v);
                     syncing = false;
                 }
