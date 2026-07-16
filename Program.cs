@@ -416,35 +416,45 @@ namespace Quickgauge
     // Loads logo.png (next to the exe) for the splash screen, header bar, and
     // settings page. The bitmap is decoded once and cached; every caller gets an
     // Image sized by height with the source's aspect ratio preserved.
-    public static class Logo
+    // Loads PNG assets that live next to the exe (logo.png, icon.png, Settings.png,
+    // slider.png, knob.png), caching each by filename so repeated Build()/Load()
+    // calls (header, splash, settings page, every slider row...) only hit disk once.
+    public static class Assets
     {
-        static BitmapImage _cached;
-        static bool _loadAttempted;
+        static readonly Dictionary<string, BitmapImage> _cache = new Dictionary<string, BitmapImage>();
 
-        static BitmapImage TryLoad()
+        public static BitmapImage Load(string filename)
         {
-            if (_loadAttempted) return _cached;
-            _loadAttempted = true;
+            BitmapImage cached;
+            if (_cache.TryGetValue(filename, out cached)) return cached;
+
+            BitmapImage bmp = null;
             try
             {
                 string dir = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string path = System.IO.Path.Combine(dir, "logo.png");
-                if (!File.Exists(path)) return null;
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.UriSource = new Uri(path, UriKind.Absolute);
-                bmp.EndInit();
-                bmp.Freeze();
-                _cached = bmp;
+                string path = System.IO.Path.Combine(dir, filename);
+                if (File.Exists(path))
+                {
+                    bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.UriSource = new Uri(path, UriKind.Absolute);
+                    bmp.EndInit();
+                    bmp.Freeze();
+                }
             }
-            catch { _cached = null; }
-            return _cached;
-        }
+            catch { bmp = null; }
 
+            _cache[filename] = bmp; // cache the miss too, so a missing file isn't retried every call
+            return bmp;
+        }
+    }
+
+    public static class Logo
+    {
         public static FrameworkElement Build(double height)
         {
-            var bmp = TryLoad();
+            var bmp = Assets.Load("logo.png");
             if (bmp == null)
             {
                 // logo.png missing/unreadable: fall back to plain text so the UI
@@ -472,6 +482,76 @@ namespace Quickgauge
     // A user-picked LibreHardwareMonitor sensor shown as an extra overlay row.
     // Warn/Crit are NaN when the user hasn't set a threshold, in which case the
     // row is always shown in the label color rather than status-colored.
+    // A slider skinned with slider.png (track) and knob.png (thumb) instead of
+    // WPF's default Slider chrome. Built on Canvas for simple absolute positioning
+    // of the knob; drag it or click anywhere on the track to set a value.
+    public class ImageSlider : Canvas
+    {
+        public event Action<double> ValueChanged;
+
+        readonly double _min, _max, _trackWidth, _knobSize;
+        double _value;
+        readonly FrameworkElement _knob;
+        bool _dragging;
+
+        public double Value
+        {
+            get { return _value; }
+            set { _value = Math.Max(_min, Math.Min(_max, value)); PositionKnob(); }
+        }
+
+        public ImageSlider(double min, double max, double initial, double width)
+        {
+            _min = min;
+            _max = max;
+            _trackWidth = width;
+            _knobSize = 18;
+            _value = Math.Max(min, Math.Min(max, initial));
+
+            Width = width;
+            Height = 22;
+            Background = Brushes.Transparent; // makes the whole row hit-testable, not just the track/knob images
+
+            var trackSource = Assets.Load("slider.png");
+            UIElement track = trackSource != null
+                ? (UIElement)new Image { Source = trackSource, Width = width, Height = 8, Stretch = Stretch.Fill }
+                : new Border { Width = width, Height = 4, Background = Brushes.DimGray, CornerRadius = new CornerRadius(2) };
+            SetLeft(track, 0);
+            SetTop(track, (Height - 8) / 2);
+            Children.Add(track);
+
+            var knobSource = Assets.Load("knob.png");
+            _knob = knobSource != null
+                ? (FrameworkElement)new Image { Source = knobSource, Width = _knobSize, Height = _knobSize }
+                : new Ellipse { Width = _knobSize, Height = _knobSize, Fill = Brushes.DodgerBlue };
+            _knob.Cursor = Cursors.Hand;
+            Children.Add(_knob);
+
+            MouseLeftButtonDown += (s, e) => { _dragging = true; CaptureMouse(); UpdateFromMouse(e.GetPosition(this).X); };
+            MouseMove += (s, e) => { if (_dragging) UpdateFromMouse(e.GetPosition(this).X); };
+            MouseLeftButtonUp += (s, e) => { _dragging = false; ReleaseMouseCapture(); };
+
+            PositionKnob();
+        }
+
+        void PositionKnob()
+        {
+            double t = (_max > _min) ? (_value - _min) / (_max - _min) : 0;
+            double x = t * (_trackWidth - _knobSize);
+            SetLeft(_knob, x);
+            SetTop(_knob, (Height - _knobSize) / 2);
+        }
+
+        void UpdateFromMouse(double x)
+        {
+            double t = Math.Max(0, Math.Min(1, (x - _knobSize / 2) / (_trackWidth - _knobSize)));
+            _value = _min + t * (_max - _min);
+            PositionKnob();
+            var cb = ValueChanged;
+            if (cb != null) cb(_value);
+        }
+    }
+
     public class CustomSensor
     {
         public string SensorId = "";
